@@ -38,6 +38,7 @@ interface Lesson {
   videos: LessonVideo[];
   hasAccess?: boolean;
   requestStatus?: 'none' | 'pending' | 'approved' | 'rejected';
+  type?: 'theory' | 'speed_revision';
 }
 
 interface LessonVideo {
@@ -85,6 +86,41 @@ const CustomLoader: React.FC = () => (
     </div>
   </div>
 );
+
+// Toggle Switch Component
+const ToggleSwitch: React.FC<{
+  leftLabel: string;
+  rightLabel: string;
+  value: 'left' | 'right';
+  onChange: (value: 'left' | 'right') => void;
+}> = ({ leftLabel, rightLabel, value, onChange }) => {
+  return (
+    <div className="flex items-center justify-center mb-6">
+      <div className="bg-gray-100 rounded-full p-1 flex items-center">
+        <button
+          onClick={() => onChange('left')}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+            value === 'left'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          {leftLabel}
+        </button>
+        <button
+          onClick={() => onChange('right')}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+            value === 'right'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          {rightLabel}
+        </button>
+      </div>
+    </div>
+  );
+};
 
 // Ripple Effect Hook
 const useRipple = () => {
@@ -238,7 +274,7 @@ export const LessonsPage: React.FC<LessonsPageProps> = ({ onNavigate, activeTab 
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
-  const [currentView, setCurrentView] = useState<'subjects' | 'lessons'>('subjects');
+  const [currentView, setCurrentView] = useState<'subjects' | 'lessons' | 'videos'>('subjects');
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [userAccess, setUserAccess] = useState<Set<string>>(new Set());
   const [userRequests, setUserRequests] = useState<Map<string, string>>(new Map());
@@ -246,6 +282,7 @@ export const LessonsPage: React.FC<LessonsPageProps> = ({ onNavigate, activeTab 
   const [loadingContainers, setLoadingContainers] = useState<Set<string>>(new Set());
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestingLesson, setRequestingLesson] = useState<Lesson | null>(null);
+  const [lessonType, setLessonType] = useState<'left' | 'right'>('left'); // Theory = left, Speed Revision = right
 
   const loadUserAccess = useCallback(async () => {
     if (!user?.id) return;
@@ -327,9 +364,12 @@ export const LessonsPage: React.FC<LessonsPageProps> = ({ onNavigate, activeTab 
         console.error('Error loading videos:', videosError);
       }
 
+      const currentLessonType = lessonType === 'left' ? 'theory' : 'speed_revision';
+
       const organizedSubjects = (subjectsData || getDefaultSubjects()).map(subject => {
         const subjectLessons = (lessonsData || [])
           .filter(lesson => lesson.subject_id === subject.id)
+          .filter(lesson => (lesson.type || 'theory') === currentLessonType)
           .map(lesson => {
             const lessonVideos = (videosData || [])
               .filter(video => video.lesson_id === lesson.id)
@@ -355,7 +395,8 @@ export const LessonsPage: React.FC<LessonsPageProps> = ({ onNavigate, activeTab 
               videoCount: lessonVideos.length,
               videos: lessonVideos.sort((a, b) => (a.position || 0) - (b.position || 0)),
               hasAccess: userAccess.has(lesson.id),
-              requestStatus: userRequests.get(lesson.id) || 'none'
+              requestStatus: userRequests.get(lesson.id) || 'none',
+              type: lesson.type || 'theory'
             };
           });
 
@@ -378,7 +419,7 @@ export const LessonsPage: React.FC<LessonsPageProps> = ({ onNavigate, activeTab 
     } finally {
       setLoading(false);
     }
-  }, [user?.id, userAccess, userRequests]);
+  }, [user?.id, userAccess, userRequests, lessonType]);
 
   const getDefaultSubjects = (): Subject[] => [
     {
@@ -541,6 +582,16 @@ export const LessonsPage: React.FC<LessonsPageProps> = ({ onNavigate, activeTab 
           </Button>
         </motion.div>
 
+        {/* Toggle Switch */}
+        {currentView === 'subjects' && (
+          <ToggleSwitch
+            leftLabel="Theory"
+            rightLabel="Speed Revision"
+            value={lessonType}
+            onChange={setLessonType}
+          />
+        )}
+
         {/* Content based on current view */}
         <AnimatePresence mode="wait">
           {currentView === 'subjects' && (
@@ -610,7 +661,7 @@ export const LessonsPage: React.FC<LessonsPageProps> = ({ onNavigate, activeTab 
   );
 };
 
-// Subjects View Component with left/right gaps
+// Subjects View Component
 const SubjectsView: React.FC<{ 
   subjects: Subject[]; 
   onSubjectClick: (subject: Subject) => void;
@@ -620,79 +671,77 @@ const SubjectsView: React.FC<{
   const { ripples, createRipple } = useRipple();
 
   return (
-    <div className="px-4 lg:px-16">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {subjects.map((subject, index) => (
-          <motion.div
-            key={subject.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className="group relative bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-xl transition-all duration-300 cursor-pointer"
-            onClick={(e) => {
-              createRipple(e);
-              onContainerClick(subject.id, () => onSubjectClick(subject));
-            }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <RippleEffect ripples={ripples} />
-            <LoadingLine isLoading={loadingContainers.has(subject.id)} />
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {subjects.map((subject, index) => (
+        <motion.div
+          key={subject.id}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: index * 0.1 }}
+          className="group relative bg-white rounded-3xl shadow-xl border-2 border-gray-100 overflow-hidden hover:shadow-2xl transition-all duration-300 cursor-pointer"
+          onClick={(e) => {
+            createRipple(e);
+            onContainerClick(subject.id, () => onSubjectClick(subject));
+          }}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          <RippleEffect ripples={ripples} />
+          <LoadingLine isLoading={loadingContainers.has(subject.id)} />
+          
+          <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
+            <img 
+              src={subject.imageUrl} 
+              alt={subject.name} 
+              className="w-full h-full object-cover"
+              loading="eager"
+              onError={(e) => { 
+                e.currentTarget.src = 'https://via.placeholder.com/320x180?text=Subject'; 
+              }} 
+            />
             
-            <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
-              <img 
-                src={subject.imageUrl} 
-                alt={subject.name} 
-                className="w-full h-full object-cover"
-                loading="eager"
-                onError={(e) => { 
-                  e.currentTarget.src = 'https://via.placeholder.com/320x180?text=Subject'; 
-                }} 
-              />
-              
-              <div className="absolute bottom-3 right-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded-lg backdrop-blur-sm font-medium">
-                {subject.lessonCount} Lessons
-              </div>
+            <div className="absolute bottom-3 right-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded-lg backdrop-blur-sm font-medium">
+              {subject.lessonCount} Lessons
             </div>
-
-            <div className="p-4">
-              <div className="flex items-start justify-between mb-3">
-                <h3 className="font-bold text-gray-900 text-base line-clamp-1 leading-tight">
-                  {subject.name}
-                </h3>
-              </div>
-
-              <p className="text-gray-600 mb-3 leading-relaxed text-sm line-clamp-2">
-                {subject.description}
-              </p>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span className={`px-3 py-1 bg-gradient-to-r ${subject.color} text-white rounded-full font-semibold text-xs`}>
-                    {subject.name}
-                  </span>
-                  <span>{subject.lessonCount} Lessons</span>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        ))}
-
-        {subjects.length === 0 && (
-          <div className="text-center py-12 col-span-full">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FontAwesomeIcon icon={faBookOpen} className="w-8 h-8 text-gray-400" />
-            </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Lessons Available</h3>
-            <p className="text-gray-600 text-sm mb-4">No lessons have been added yet.</p>
           </div>
-        )}
-      </div>
+
+          <div className="p-5">
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="font-bold text-gray-900 text-lg line-clamp-1 leading-tight">
+                {subject.name}
+              </h3>
+            </div>
+
+            <p className="text-gray-600 mb-4 leading-relaxed text-sm line-clamp-2">
+              {subject.description}
+            </p>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span className={`px-3 py-1 bg-gradient-to-r ${subject.color} text-white rounded-full font-semibold text-xs`}>
+                  {subject.name}
+                </span>
+                <span>{subject.lessonCount} Lessons</span>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      ))}
+
+      {subjects.length === 0 && (
+        <div className="text-center py-12 col-span-full">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <FontAwesomeIcon icon={faBookOpen} className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No Lessons Available</h3>
+          <p className="text-gray-600 text-sm mb-4">No lessons have been added yet.</p>
+        </div>
+      )}
     </div>
   );
 };
 
-// Lessons View Component with left/right gaps
+// Lessons View Component
 const LessonsView: React.FC<{ 
   subject: Subject; 
   onRequestAccess: (lesson: Lesson) => void;
@@ -741,102 +790,100 @@ const LessonsView: React.FC<{
   };
 
   return (
-    <div className="px-4 lg:px-16">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {subject.lessons.map((lesson, index) => (
-          <motion.div
-            key={lesson.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className={`group relative bg-white rounded-2xl shadow-lg border overflow-hidden hover:shadow-xl transition-all duration-300 ${
-              !lesson.hasAccess && lesson.requestStatus !== 'pending' ? 'cursor-pointer' : 'cursor-default'
-            } ${!lesson.hasAccess ? 'opacity-75' : ''}`}
-            onClick={(e) => {
-              if (!lesson.hasAccess && lesson.requestStatus !== 'pending') {
-                createRipple(e);
-                onContainerClick(lesson.id, () => handleLessonClick(lesson));
-              }
-            }}
-            whileHover={{ scale: !lesson.hasAccess && lesson.requestStatus !== 'pending' ? 1.05 : 1 }}
-            whileTap={{ scale: !lesson.hasAccess && lesson.requestStatus !== 'pending' ? 0.95 : 1 }}
-          >
-            <RippleEffect ripples={ripples} />
-            <LoadingLine isLoading={loadingContainers.has(lesson.id)} />
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {subject.lessons.map((lesson, index) => (
+        <motion.div
+          key={lesson.id}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: index * 0.1 }}
+          className={`group relative bg-white rounded-3xl shadow-xl border-2 border-gray-100 overflow-hidden hover:shadow-2xl transition-all duration-300 ${
+            !lesson.hasAccess && lesson.requestStatus !== 'pending' ? 'cursor-pointer' : 'cursor-default'
+          } ${!lesson.hasAccess ? 'opacity-75' : ''}`}
+          onClick={(e) => {
+            if (!lesson.hasAccess && lesson.requestStatus !== 'pending') {
+              createRipple(e);
+              onContainerClick(lesson.id, () => handleLessonClick(lesson));
+            }
+          }}
+          whileHover={{ scale: !lesson.hasAccess && lesson.requestStatus !== 'pending' ? 1.02 : 1 }}
+          whileTap={{ scale: !lesson.hasAccess && lesson.requestStatus !== 'pending' ? 0.98 : 1 }}
+        >
+          <RippleEffect ripples={ripples} />
+          <LoadingLine isLoading={loadingContainers.has(lesson.id)} />
+          
+          <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
+            <img 
+              src={lesson.thumbnailUrl || 'https://via.placeholder.com/320x180?text=Lesson'} 
+              alt={lesson.title} 
+              className="w-full h-full object-cover"
+              loading="eager"
+              onError={(e) => { 
+                e.currentTarget.src = 'https://via.placeholder.com/320x180?text=Lesson'; 
+              }} 
+            />
             
-            <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
-              <img 
-                src={lesson.thumbnailUrl || 'https://via.placeholder.com/320x180?text=Lesson'} 
-                alt={lesson.title} 
-                className="w-full h-full object-cover"
-                loading="eager"
-                onError={(e) => { 
-                  e.currentTarget.src = 'https://via.placeholder.com/320x180?text=Lesson'; 
-                }} 
-              />
-              
-              {getStatusBadge(lesson)}
-              
-              <div className="absolute bottom-3 right-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded-lg backdrop-blur-sm font-medium">
-                {lesson.videoCount} Videos
-              </div>
+            {getStatusBadge(lesson)}
+            
+            <div className="absolute bottom-3 right-3 bg-black/80 text-white text-xs px-3 py-1.5 rounded-lg backdrop-blur-sm font-medium">
+              {lesson.videoCount} Videos
+            </div>
 
-              {!lesson.hasAccess && (
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                  <div className="text-center text-white">
-                    <FontAwesomeIcon icon={faLock} className="w-8 h-8 mb-2" />
-                    <p className="text-sm font-medium">
-                      {lesson.requestStatus === 'pending' ? 'Request Pending' : 'Request Access'}
-                    </p>
-                  </div>
+            {!lesson.hasAccess && (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                <div className="text-center text-white">
+                  <FontAwesomeIcon icon={faLock} className="w-8 h-8 mb-2" />
+                  <p className="text-sm font-medium">
+                    {lesson.requestStatus === 'pending' ? 'Request Pending' : 'Request Access'}
+                  </p>
                 </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-5">
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="font-bold text-gray-900 text-lg line-clamp-1 leading-tight">
+                {lesson.title}
+              </h3>
+            </div>
+
+            <p className="text-gray-600 mb-4 leading-relaxed text-sm line-clamp-2">
+              {lesson.description}
+            </p>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <FontAwesomeIcon icon={faPlay} className="w-3 h-3" />
+                <span>{lesson.videoCount} Videos</span>
+              </div>
+              
+              {!lesson.hasAccess && lesson.requestStatus !== 'pending' && (
+                <Button
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-xs px-3 py-1"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleLessonClick(lesson);
+                  }}
+                >
+                  Request Access
+                </Button>
               )}
             </div>
-
-            <div className="p-4">
-              <div className="flex items-start justify-between mb-3">
-                <h3 className="font-bold text-gray-900 text-base line-clamp-1 leading-tight">
-                  {lesson.title}
-                </h3>
-              </div>
-
-              <p className="text-gray-600 mb-3 leading-relaxed text-sm line-clamp-2">
-                {lesson.description}
-              </p>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <FontAwesomeIcon icon={faPlay} className="w-3 h-3" />
-                  <span>{lesson.videoCount} Videos</span>
-                </div>
-                
-                {!lesson.hasAccess && lesson.requestStatus !== 'pending' && (
-                  <Button
-                    size="sm"
-                    className="bg-blue-600 hover:bg-blue-700 text-xs px-3 py-1"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleLessonClick(lesson);
-                    }}
-                  >
-                    Request Access
-                  </Button>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        ))}
-
-        {subject.lessons.length === 0 && (
-          <div className="text-center py-12 col-span-full">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FontAwesomeIcon icon={faBookOpen} className="w-8 h-8 text-gray-400" />
-            </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Lessons Available</h3>
-            <p className="text-gray-600 text-sm mb-4">No lessons have been added to this subject yet.</p>
           </div>
-        )}
-      </div>
+        </motion.div>
+      ))}
+
+      {subject.lessons.length === 0 && (
+        <div className="text-center py-12 col-span-full">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <FontAwesomeIcon icon={faBookOpen} className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No Lessons Available</h3>
+          <p className="text-gray-600 text-sm mb-4">No lessons have been added to this subject yet.</p>
+        </div>
+      )}
     </div>
   );
 };
